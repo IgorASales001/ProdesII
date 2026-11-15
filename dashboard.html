@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estação Meteorológica Inteligente</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { --bg:#f4f6f8; --painel:#ffffff; --texto:#1b2430; --suave:#5b6773; --borda:#dde3e9; --destaque:#1d6fd6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12171d; --painel:#1b222b; --texto:#e8edf2; --suave:#9aa7b4; --borda:#2c3744; --destaque:#5aa2ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--texto); font-family: system-ui, "Segoe UI", Arial, sans-serif; }
+  header { max-width:1100px; margin:0 auto 12px; }
+  h1 { margin:0 0 4px; font-size:1.5rem; }
+  #sub { margin:0; color:var(--suave); font-size:.9rem; }
+  .alerta { max-width:1100px; margin:0 auto 12px; padding:12px 16px; border-radius:8px; background:#c92a2a; color:#fff; font-weight:600; }
+  .oculto { display:none; }
+  .cards { max-width:1100px; margin:0 auto 12px; display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
+  .card, .painel { background:var(--painel); border:1px solid var(--borda); border-radius:10px; padding:14px; }
+  .card h2, .painel h2 { margin:0 0 6px; font-size:.85rem; font-weight:600; color:var(--suave); text-transform:uppercase; letter-spacing:.04em; }
+  .valor { font-size:1.9rem; font-weight:700; }
+  .detalhe { color:var(--suave); font-size:.85rem; min-height:1.2em; }
+  .grade { max-width:1100px; margin:0 auto; display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:12px; }
+  .grafico-caixa { position:relative; height:220px; }
+  .grade + .grade { margin-top:12px; }
+  #mapa { height:260px; border-radius:8px; }
+  button { margin-top:8px; padding:8px 12px; border:0; border-radius:6px; background:var(--destaque); color:#fff; font-size:.9rem; cursor:pointer; }
+  p { margin:6px 0 0; font-size:.9rem; }
+  #qr { width:200px; max-width:100%; background:#fff; border-radius:8px; padding:6px; }
+  .link-acesso { word-break:break-all; color:var(--suave); }
+  footer { max-width:1100px; margin:12px auto 0; color:var(--suave); font-size:.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Estação Meteorológica Inteligente</h1>
+  <p id="sub">Aguardando dados...</p>
+</header>
+
+<div id="alerta" class="alerta oculto"></div>
+
+<section class="cards">
+  <div class="card"><h2>Temperatura</h2><div class="valor" id="temp">--</div><div class="detalhe" id="tempMedia"></div></div>
+  <div class="card"><h2>Umidade</h2><div class="valor" id="umid">--</div><div class="detalhe" id="umidMedia"></div></div>
+  <div class="card"><h2>Luminosidade</h2><div class="valor" id="luz">--</div><div class="detalhe" id="luzRaw"></div></div>
+  <div class="card"><h2>Chuva</h2><div class="valor" id="chuva">--</div><div class="detalhe" id="chuvaRaw"></div></div>
+  <div class="card"><h2>Pressão atmosférica</h2><div class="valor" id="press">--</div><div class="detalhe" id="pressMedia"></div></div>
+  <div class="card"><h2>Pluviômetro (simulado)</h2><div class="valor" id="pluv">--</div><div class="detalhe" id="pluvRaw"></div></div>
+  <div class="card"><h2>Qualidade do ar</h2><div class="valor" id="gas">--</div><div class="detalhe" id="gasRaw"></div></div>
+</section>
+
+<section class="grade">
+  <div class="painel">
+    <h2>Temperatura (°C)</h2>
+    <div class="grafico-caixa"><canvas id="grafTemp"></canvas></div>
+  </div>
+  <div class="painel">
+    <h2>Média móvel da temperatura (°C)</h2>
+    <div class="grafico-caixa"><canvas id="grafMedia"></canvas></div>
+  </div>
+  <div class="painel">
+    <h2>Umidade (%)</h2>
+    <div class="grafico-caixa"><canvas id="grafUmid"></canvas></div>
+  </div>
+  <div class="painel">
+    <h2>Pressão atmosférica (hPa)</h2>
+    <div class="grafico-caixa"><canvas id="grafPressao"></canvas></div>
+  </div>
+</section>
+
+<section class="grade">
+  <div class="painel">
+    <h2>Localização da estação</h2>
+    <div id="mapa"></div>
+    <p id="coord"></p>
+    <button id="btnDist" type="button">Calcular distância até mim</button>
+    <p id="dist"></p>
+  </div>
+  <div class="painel">
+    <h2>Acessar pelo celular</h2>
+    <img id="qr" alt="QR code de acesso ao dashboard" hidden>
+    <p id="acessoTexto">Gerando links de acesso...</p>
+    <p class="link-acesso" id="acessoPublico"></p>
+    <p class="link-acesso" id="acessoLocal"></p>
+  </div>
+</section>
+
+<footer>Atualiza automaticamente a cada 5 segundos. Valores de luz, chuva e gás são leituras brutas do conversor (0 a 4095).</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+const NOMES_ALERTA = {
+  TEMPESTADE: "Risco de tempestade",
+  AR_RUIM: "Qualidade do ar ruim",
+  CALOR_EXTREMO: "Calor extremo"
+};
+let mapa = null;
+let estacao = null;
+
+function criarGrafico(idCanvas, rotulo, cor, escalaY) {
+  return new Chart($(idCanvas), {
+    type: "line",
+    data: { labels: [], datasets: [{ label: rotulo, data: [], borderColor: cor, tension: 0.3 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: escalaY || {} } }
+  });
+}
+
+const grafTemp = criarGrafico("grafTemp", "Temperatura (°C)", "#e5484d");
+const grafMedia = criarGrafico("grafMedia", "Média móvel (°C)", "#f5a524");
+const grafUmid = criarGrafico("grafUmid", "Umidade (%)", "#3b82f6", { min: 0, max: 100 });
+const grafPressao = criarGrafico("grafPressao", "Pressão (hPa)", "#8b5cf6");
+
+function rotuloLuz(v) { return v > 3000 ? "Escuro" : (v > 1000 ? "Penumbra" : "Claro"); }
+function rotuloChuva(v) { return v < 3000 ? "Chovendo" : "Seco"; }
+function rotuloGas(v) { return v > 400 ? "Alto" : "Normal"; }
+
+function mostrarEstacao(e) {
+  $("coord").textContent = e.nome + " — latitude " + e.latitude + ", longitude " + e.longitude;
+  if (mapa === null) {
+    mapa = L.map("mapa").setView([e.latitude, e.longitude], 15);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(mapa);
+    L.marker([e.latitude, e.longitude]).addTo(mapa).bindPopup(e.nome);
+  }
+}
+
+function mostrarUltima(u, nome) {
+  $("sub").textContent = "Última leitura: " + u.data_hora.replace("T", " ") + " — " + nome;
+  $("temp").textContent = u.temperatura.toFixed(1) + " °C";
+  $("tempMedia").textContent = "Média móvel: " + u.temp_media.toFixed(1) + " °C";
+  $("umid").textContent = u.umidade.toFixed(1) + " %";
+  $("umidMedia").textContent = "Média móvel: " + u.umid_media.toFixed(1) + " %";
+  $("luz").textContent = rotuloLuz(u.luz);
+  $("luzRaw").textContent = "Leitura bruta: " + u.luz;
+  $("chuva").textContent = rotuloChuva(u.chuva);
+  $("chuvaRaw").textContent = "Leitura bruta: " + u.chuva;
+  $("gas").textContent = rotuloGas(u.gas);
+  $("gasRaw").textContent = "Leitura bruta: " + u.gas;
+  const semPluv = (u.chuva_mm === null || u.chuva_mm === undefined);
+  $("pluv").textContent = semPluv ? "--" : u.chuva_mm.toFixed(2) + " mm";
+  $("pluvRaw").textContent = semPluv ? "Sem dados" : "Basculadas: " + u.pulsos;
+  const semPress = (u.pressao === null || u.pressao === undefined);
+  $("press").textContent = semPress ? "--" : u.pressao.toFixed(1) + " hPa";
+  const semMediaP = (u.press_media === null || u.press_media === undefined);
+  $("pressMedia").textContent = semMediaP ? "Sem dados do BMP280" : "Média móvel: " + u.press_media.toFixed(1) + " hPa";
+
+  const caixa = $("alerta");
+  if (u.alerta && u.alerta !== "NENHUM") {
+    const nomes = u.alerta.split(",").map((a) => NOMES_ALERTA[a] || a);
+    caixa.textContent = "Alerta: " + nomes.join(" | ");
+    caixa.classList.remove("oculto");
+  } else {
+    caixa.classList.add("oculto");
+  }
+}
+
+function atualizarGrafico(g, rotulos, valores) {
+  g.data.labels = rotulos;
+  g.data.datasets[0].data = valores;
+  g.update();
+}
+
+function mostrarHistorico(h) {
+  const horas = h.map((x) => x.data_hora.slice(11, 19));
+  atualizarGrafico(grafTemp, horas, h.map((x) => x.temperatura));
+  atualizarGrafico(grafMedia, horas, h.map((x) => x.temp_media));
+  atualizarGrafico(grafUmid, horas, h.map((x) => x.umidade));
+  atualizarGrafico(grafPressao, horas, h.map((x) => x.pressao));
+}
+
+async function atualizar() {
+  try {
+    const resposta = await fetch("/api/dados");
+    const d = await resposta.json();
+    estacao = d.estacao;
+    if (d.estacao) { mostrarEstacao(d.estacao); }
+    if (d.ultima) { mostrarUltima(d.ultima, d.estacao ? d.estacao.nome : ""); }
+    mostrarHistorico(d.historico);
+  } catch (erro) {
+    $("sub").textContent = "Sem conexão com o servidor do dashboard.";
+  }
+}
+
+// Distância entre dois pontos da superfície terrestre (fórmula de Haversine)
+function distanciaKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const rad = (x) => (x * Math.PI) / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+$("btnDist").addEventListener("click", () => {
+  if (!estacao || !navigator.geolocation) {
+    $("dist").textContent = "Localização indisponível neste navegador.";
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const km = distanciaKm(pos.coords.latitude, pos.coords.longitude, estacao.latitude, estacao.longitude);
+      $("dist").textContent = "Você está a " + km.toFixed(2) + " km da estação.";
+    },
+    () => { $("dist").textContent = "Não foi possível obter sua localização."; }
+  );
+});
+
+async function carregarAcesso() {
+  try {
+    const resposta = await fetch("/api/acesso");
+    const a = await resposta.json();
+    const alvo = a.publico ? "publico" : "local";
+    $("acessoPublico").textContent = a.publico ? "Link público (provisório): " + a.publico : "Link público: não iniciado";
+    $("acessoLocal").textContent = a.rede_local ? "Na mesma rede Wi-Fi: " + a.rede_local : "";
+    $("acessoTexto").textContent = "Aponte a câmera do celular para o QR code (" + (a.publico ? "link público" : "rede local") + ").";
+    const img = $("qr");
+    img.onerror = () => { img.hidden = true; $("acessoTexto").textContent = "QR code indisponível (instale o pacote qrcode). Use os links abaixo."; };
+    img.onload = () => { img.hidden = false; };
+    const novo = "/qr.svg?alvo=" + alvo + "&p=" + encodeURIComponent(a.publico || a.rede_local || "");
+    if (img.dataset.src !== novo) { img.dataset.src = novo; img.src = novo; }
+  } catch (erro) {
+    $("acessoTexto").textContent = "Links de acesso indisponíveis.";
+  }
+}
+
+atualizar();
+setInterval(atualizar, 5000);
+carregarAcesso();
+setInterval(carregarAcesso, 10000);
+</script>
+</body>
+</html>
