@@ -32,13 +32,22 @@ def vigiar_tunel(processo):
             print(f"\n=== LINK PUBLICO (provisorio): {url} ===\n", flush=True)
 
 
+def achar_cloudflared():
+    """Procura o cloudflared no PATH ou, se for portatil, na mesma pasta deste script."""
+    exe = shutil.which("cloudflared")
+    if exe:
+        return exe
+    local = os.path.join(PASTA, "cloudflared.exe")
+    return local if os.path.exists(local) else None
+
+
 def main():
     salvar_acesso(None)  # apaga o link da execucao anterior
     processos = []
     try:
         processos.append(subprocess.Popen([sys.executable, "backend.py"], cwd=PASTA))
         processos.append(subprocess.Popen([sys.executable, "dashboard.py"], cwd=PASTA))
-        exe = shutil.which("cloudflared")
+        exe = achar_cloudflared()
         if exe:
             tunel = subprocess.Popen(
                 [exe, "tunnel", "--url", f"http://localhost:{PORTA_WEB}"],
@@ -47,7 +56,7 @@ def main():
             processos.append(tunel)
             threading.Thread(target=vigiar_tunel, args=(tunel,), daemon=True).start()
         else:
-            print("cloudflared nao encontrado: so havera acesso local e pela rede Wi-Fi.")
+            print("cloudflared nao encontrado (instale-o ou coloque cloudflared.exe nesta pasta): so havera acesso local e pela rede Wi-Fi.")
         time.sleep(2)
         webbrowser.open(f"http://localhost:{PORTA_WEB}")
         print("Demonstracao no ar. Pressione Ctrl+C para encerrar tudo.")
